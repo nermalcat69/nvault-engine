@@ -1,6 +1,6 @@
 # nVault
 
-A local-first encrypted storage engine written in Rust. Store arbitrary records — text, JSON, SVG, binary — inside a single encrypted `.vlt` file. Built as reusable infrastructure, not a notes app.
+A local-first encrypted storage engine written in Rust. Store arbitrary records — text, JSON, SVG, binary — inside a single encrypted `.vlt` file.
 
 ## Crates
 

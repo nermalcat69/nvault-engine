@@ -1,0 +1,8 @@
+[package]
+name = "vault-compression"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zstd      = "0.13"
+thiserror = "1"

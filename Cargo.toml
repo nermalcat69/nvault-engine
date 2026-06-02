@@ -5,6 +5,8 @@ members = [
     "crates/vault-crypto",
     "crates/vault-storage",
     "crates/vault-index",
+    "crates/vault-compression",
+    "crates/vault-search",
     "crates/vault-core",
 ]
 resolver = "2"

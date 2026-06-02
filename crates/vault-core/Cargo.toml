@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-vault-types   = { path = "../vault-types" }
-vault-crypto  = { path = "../vault-crypto" }
-vault-storage = { path = "../vault-storage" }
-vault-index   = { path = "../vault-index" }
+vault-types       = { path = "../vault-types" }
+vault-crypto      = { path = "../vault-crypto" }
+vault-storage     = { path = "../vault-storage" }
+vault-index       = { path = "../vault-index" }
+vault-compression = { path = "../vault-compression" }
+vault-search      = { path = "../vault-search" }
 serde         = { version = "1", features = ["derive"] }
 bincode       = "1"
 thiserror     = "1"
+blake3        = "1"
 uuid          = { version = "1", features = ["v4", "serde"] }

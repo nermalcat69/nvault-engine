@@ -30,7 +30,7 @@ fn create_open_put_get_delete() {
 
 #[test]
 fn wrong_password_fails() {
-    let path = tmp_path("test_vault_auth.vlt");
+    let path = tmp_path("test_vault_auth2.vlt");
     let _ = std::fs::remove_file(&path);
     Vault::create(&path, "correct").unwrap();
     assert!(Vault::open(&path, "wrong").is_err());
@@ -39,7 +39,7 @@ fn wrong_password_fails() {
 
 #[test]
 fn list_and_collections() {
-    let path = tmp_path("test_vault_list.vlt");
+    let path = tmp_path("test_vault_list2.vlt");
     let _ = std::fs::remove_file(&path);
 
     let mut vault = Vault::create(&path, "pass").unwrap();
@@ -60,17 +60,72 @@ fn list_and_collections() {
 }
 
 #[test]
-fn update_record() {
-    let path = tmp_path("test_vault_update.vlt");
+fn version_history() {
+    let path = tmp_path("test_vault_versions.vlt");
     let _ = std::fs::remove_file(&path);
 
     let mut vault = Vault::create(&path, "pass").unwrap();
-    let id = vault.put(Record::new("notes", "text", b"original".to_vec())).unwrap();
-    vault.update(id, b"updated".to_vec()).unwrap();
+    let id = vault.put(Record::new("notes", "text", b"draft one".to_vec())).unwrap();
+    vault.update(id, b"draft two".to_vec()).unwrap();
+    vault.update(id, b"final".to_vec()).unwrap();
+
+    let vault = Vault::open(&path, "pass").unwrap();
+
+    let r = vault.get(&id).unwrap();
+    assert_eq!(r.payload, b"final");
+
+    let history = vault.history(&id).unwrap();
+    assert_eq!(history.len(), 3);
+    assert_eq!(history[0].version, 1);
+    assert_eq!(history[2].version, 3);
+
+    let (_, payload_v1) = vault.get_version(&id, 1).unwrap();
+    assert_eq!(payload_v1, b"draft one");
+
+    let (_, payload_v2) = vault.get_version(&id, 2).unwrap();
+    assert_eq!(payload_v2, b"draft two");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn chunk_deduplication() {
+    let path = tmp_path("test_vault_dedup.vlt");
+    let _ = std::fs::remove_file(&path);
+
+    let mut vault = Vault::create(&path, "pass").unwrap();
+
+    // Two records with identical content → chunks stored once.
+    let same = b"identical payload".to_vec();
+    vault.put(Record::new("a", "text", same.clone())).unwrap();
+    vault.put(Record::new("b", "text", same)).unwrap();
+
+    // Both records readable after reload.
+    let vault = Vault::open(&path, "pass").unwrap();
+    let records = vault.list(None);
+    assert_eq!(records.len(), 2);
+    for info in &records {
+        let r = vault.get(&info.id).unwrap();
+        assert_eq!(r.payload, b"identical payload");
+    }
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn large_record_spans_multiple_chunks() {
+    let path = tmp_path("test_vault_large.vlt");
+    let _ = std::fs::remove_file(&path);
+
+    // 10 KB payload → 3 chunks at 4 KB each
+    let payload: Vec<u8> = (0u8..=255).cycle().take(10 * 1024).collect();
+
+    let mut vault = Vault::create(&path, "pass").unwrap();
+    let id = vault.put(Record::new("files", "binary", payload.clone())).unwrap();
 
     let vault = Vault::open(&path, "pass").unwrap();
     let r = vault.get(&id).unwrap();
-    assert_eq!(r.payload, b"updated");
+    assert_eq!(r.payload, payload);
 
     let _ = std::fs::remove_file(&path);
 }

@@ -29,14 +29,16 @@ enum Commands {
         #[arg(long)]
         password: Option<String>,
     },
-    /// Retrieve a record by ID
+    /// Retrieve the latest version of a record
     Get {
         path: String,
         id: String,
+        #[arg(long, help = "Retrieve a specific historical version")]
+        version: Option<u32>,
         #[arg(long)]
         password: Option<String>,
     },
-    /// Update a record's payload by ID
+    /// Update a record's payload (creates a new version)
     Update {
         path: String,
         id: String,
@@ -44,7 +46,7 @@ enum Commands {
         #[arg(long)]
         password: Option<String>,
     },
-    /// Delete a record by ID
+    /// Delete a record (version history is retained)
     Delete {
         path: String,
         id: String,
@@ -61,6 +63,32 @@ enum Commands {
     },
     /// List all collections in the vault
     Collections {
+        path: String,
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Show version history for a record
+    History {
+        path: String,
+        id: String,
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Verify vault integrity: chunk hashes, references, and index consistency
+    Verify {
+        path: String,
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Search records by text content (AND semantics for multiple words)
+    Search {
+        path: String,
+        query: String,
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Close confirmation (vault is always flushed on write; this validates it can be opened)
+    Close {
         path: String,
         #[arg(long)]
         password: Option<String>,
@@ -92,21 +120,37 @@ fn main() -> Result<()> {
             println!("{}", id);
         }
 
-        Commands::Get { path, id, password } => {
+        Commands::Get { path, id, version, password } => {
             let pw = get_password(password)?;
             let vault = Vault::open(Path::new(&path), &pw)?;
             let uuid = id.parse::<Uuid>()?;
-            let r = vault.get(&uuid)?;
-            println!("id:         {}", r.id);
-            println!("collection: {}", r.collection);
-            println!("kind:       {}", r.kind);
-            println!("created:    {}", r.metadata.created_at);
-            println!("updated:    {}", r.metadata.updated_at);
-            if !r.metadata.tags.is_empty() {
-                println!("tags:       {}", r.metadata.tags.join(", "));
+
+            match version {
+                Some(v) => {
+                    let (rv, payload) = vault.get_version(&uuid, v)?;
+                    println!("id:      {}", uuid);
+                    println!("version: {} (of {})", rv.version, vault.history(&uuid)?.len());
+                    println!("kind:    {}", rv.kind);
+                    println!("updated: {}", rv.timestamp);
+                    println!("---");
+                    println!("{}", String::from_utf8_lossy(&payload));
+                }
+                None => {
+                    let r = vault.get(&uuid)?;
+                    let versions = vault.history(&uuid)?.len();
+                    println!("id:         {}", r.id);
+                    println!("collection: {}", r.collection);
+                    println!("kind:       {}", r.kind);
+                    println!("version:    {}", versions);
+                    println!("created:    {}", r.metadata.created_at);
+                    println!("updated:    {}", r.metadata.updated_at);
+                    if !r.metadata.tags.is_empty() {
+                        println!("tags:       {}", r.metadata.tags.join(", "));
+                    }
+                    println!("---");
+                    println!("{}", String::from_utf8_lossy(&r.payload));
+                }
             }
-            println!("---");
-            println!("{}", String::from_utf8_lossy(&r.payload));
         }
 
         Commands::Update { path, id, data, password } => {
@@ -114,7 +158,8 @@ fn main() -> Result<()> {
             let mut vault = Vault::open(Path::new(&path), &pw)?;
             let uuid = id.parse::<Uuid>()?;
             vault.update(uuid, data.into_bytes())?;
-            println!("Updated {}", id);
+            let versions = vault.history(&uuid)?.len();
+            println!("Updated {} (now at version {})", id, versions);
         }
 
         Commands::Delete { path, id, password } => {
@@ -129,14 +174,14 @@ fn main() -> Result<()> {
             let pw = get_password(password)?;
             let vault = Vault::open(Path::new(&path), &pw)?;
             let mut records = vault.list(collection.as_deref());
-            records.sort_by_key(|(_, r)| r.metadata.updated_at);
+            records.sort_by_key(|r| r.updated_at);
             if records.is_empty() {
                 println!("(no records)");
             } else {
-                println!("{:<38} {:<20} {:<10}", "id", "collection", "kind");
-                println!("{}", "-".repeat(72));
-                for (id, r) in records {
-                    println!("{:<38} {:<20} {:<10}", id, r.collection, r.kind);
+                println!("{:<38} {:<20} {:<10} {}", "id", "collection", "kind", "ver");
+                println!("{}", "-".repeat(76));
+                for r in records {
+                    println!("{:<38} {:<20} {:<10} v{}", r.id, r.collection, r.kind, r.version);
                 }
             }
         }
@@ -152,6 +197,70 @@ fn main() -> Result<()> {
                     println!("{}", col);
                 }
             }
+        }
+
+        Commands::History { path, id, password } => {
+            let pw = get_password(password)?;
+            let vault = Vault::open(Path::new(&path), &pw)?;
+            let uuid = id.parse::<Uuid>()?;
+            let history = vault.history(&uuid)?;
+            println!("{:<8} {:<12} {}", "version", "timestamp", "kind");
+            println!("{}", "-".repeat(40));
+            for v in &history {
+                println!("v{:<7} {:<12} {}", v.version, v.timestamp, v.kind);
+            }
+        }
+
+        Commands::Search { path, query, password } => {
+            let pw = get_password(password)?;
+            let vault = Vault::open(Path::new(&path), &pw)?;
+            let results = vault.search(&query);
+            if results.is_empty() {
+                println!("No results for \"{}\"", query);
+            } else {
+                println!(
+                    "{:<38} {:<20} {:<8} {:<6} {}",
+                    "id", "collection", "kind", "score", "matched"
+                );
+                println!("{}", "-".repeat(84));
+                for sr in results {
+                    println!(
+                        "{:<38} {:<20} {:<8} {:<6.2} {}",
+                        sr.record.id,
+                        sr.record.collection,
+                        sr.record.kind,
+                        sr.score,
+                        sr.matched_terms.join(", ")
+                    );
+                }
+            }
+        }
+
+        Commands::Verify { path, password } => {
+            let pw = get_password(password)?;
+            let vault = Vault::open(Path::new(&path), &pw)?;
+            let report = vault.verify();
+
+            println!("records checked:   {}", report.records_checked);
+            println!("versions checked:  {}", report.versions_checked);
+            println!("chunks checked:    {}", report.chunks_checked);
+            println!("orphaned chunks:   {}", report.orphaned_chunks);
+
+            if report.ok() {
+                println!("\nIntegrity OK — vault is clean.");
+            } else {
+                println!("\n{} error(s) found:", report.errors.len());
+                for e in &report.errors {
+                    println!("  • {}", e);
+                }
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Close { path, password } => {
+            let pw = get_password(password)?;
+            Vault::open(Path::new(&path), &pw)?;
+            println!("Vault closed: {}", path);
         }
     }
 
