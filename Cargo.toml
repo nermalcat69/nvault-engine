@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "apps/cli",
+    "crates/vault-types",
+    "crates/vault-crypto",
+    "crates/vault-storage",
+    "crates/vault-index",
+    "crates/vault-core",
+]
+resolver = "2"

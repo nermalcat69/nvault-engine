@@ -1,0 +1,10 @@
+[package]
+name = "vault-crypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = { version = "0.8", features = ["std"] }
+thiserror = "1"

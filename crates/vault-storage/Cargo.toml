@@ -1,0 +1,8 @@
+[package]
+name = "vault-storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vault-types = { path = "../vault-types" }
+thiserror = "1"
