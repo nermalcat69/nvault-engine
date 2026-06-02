@@ -4,6 +4,7 @@ use std::path::Path;
 use uuid::Uuid;
 use vault_core::Vault;
 use vault_types::Record;
+use zeroize::Zeroizing;
 
 #[derive(Parser)]
 #[command(name = "vault", about = "Encrypted local vault — store, read, and manage records")]
@@ -95,11 +96,13 @@ enum Commands {
     },
 }
 
-fn get_password(pw: Option<String>) -> Result<String> {
-    match pw {
-        Some(p) => Ok(p),
-        None => Ok(rpassword::prompt_password("Password: ")?),
-    }
+/// Returns the password wrapped in Zeroizing so the bytes are wiped from
+/// memory as soon as the returned value is dropped (after key derivation).
+fn get_password(pw: Option<String>) -> Result<Zeroizing<String>> {
+    Ok(Zeroizing::new(match pw {
+        Some(p) => p,
+        None => rpassword::prompt_password("Password: ")?,
+    }))
 }
 
 fn main() -> Result<()> {
@@ -108,13 +111,13 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Create { path, password } => {
             let pw = get_password(password)?;
-            Vault::create(Path::new(&path), &pw)?;
+            Vault::create(Path::new(&path), &*pw)?;
             println!("Vault created: {}", path);
         }
 
         Commands::Put { path, collection, kind, data, password } => {
             let pw = get_password(password)?;
-            let mut vault = Vault::open(Path::new(&path), &pw)?;
+            let mut vault = Vault::open(Path::new(&path), &*pw)?;
             let record = Record::new(collection, kind, data.into_bytes());
             let id = vault.put(record)?;
             println!("{}", id);
@@ -122,7 +125,7 @@ fn main() -> Result<()> {
 
         Commands::Get { path, id, version, password } => {
             let pw = get_password(password)?;
-            let vault = Vault::open(Path::new(&path), &pw)?;
+            let vault = Vault::open(Path::new(&path), &*pw)?;
             let uuid = id.parse::<Uuid>()?;
 
             match version {
@@ -155,7 +158,7 @@ fn main() -> Result<()> {
 
         Commands::Update { path, id, data, password } => {
             let pw = get_password(password)?;
-            let mut vault = Vault::open(Path::new(&path), &pw)?;
+            let mut vault = Vault::open(Path::new(&path), &*pw)?;
             let uuid = id.parse::<Uuid>()?;
             vault.update(uuid, data.into_bytes())?;
             let versions = vault.history(&uuid)?.len();
@@ -164,7 +167,7 @@ fn main() -> Result<()> {
 
         Commands::Delete { path, id, password } => {
             let pw = get_password(password)?;
-            let mut vault = Vault::open(Path::new(&path), &pw)?;
+            let mut vault = Vault::open(Path::new(&path), &*pw)?;
             let uuid = id.parse::<Uuid>()?;
             vault.delete(&uuid)?;
             println!("Deleted {}", id);
@@ -172,7 +175,7 @@ fn main() -> Result<()> {
 
         Commands::List { path, collection, password } => {
             let pw = get_password(password)?;
-            let vault = Vault::open(Path::new(&path), &pw)?;
+            let vault = Vault::open(Path::new(&path), &*pw)?;
             let mut records = vault.list(collection.as_deref());
             records.sort_by_key(|r| r.updated_at);
             if records.is_empty() {
@@ -188,7 +191,7 @@ fn main() -> Result<()> {
 
         Commands::Collections { path, password } => {
             let pw = get_password(password)?;
-            let vault = Vault::open(Path::new(&path), &pw)?;
+            let vault = Vault::open(Path::new(&path), &*pw)?;
             let cols = vault.collections();
             if cols.is_empty() {
                 println!("(no collections)");
@@ -201,7 +204,7 @@ fn main() -> Result<()> {
 
         Commands::History { path, id, password } => {
             let pw = get_password(password)?;
-            let vault = Vault::open(Path::new(&path), &pw)?;
+            let vault = Vault::open(Path::new(&path), &*pw)?;
             let uuid = id.parse::<Uuid>()?;
             let history = vault.history(&uuid)?;
             println!("{:<8} {:<12} {}", "version", "timestamp", "kind");
@@ -213,7 +216,7 @@ fn main() -> Result<()> {
 
         Commands::Search { path, query, password } => {
             let pw = get_password(password)?;
-            let vault = Vault::open(Path::new(&path), &pw)?;
+            let vault = Vault::open(Path::new(&path), &*pw)?;
             let results = vault.search(&query);
             if results.is_empty() {
                 println!("No results for \"{}\"", query);
@@ -238,7 +241,7 @@ fn main() -> Result<()> {
 
         Commands::Verify { path, password } => {
             let pw = get_password(password)?;
-            let vault = Vault::open(Path::new(&path), &pw)?;
+            let vault = Vault::open(Path::new(&path), &*pw)?;
             let report = vault.verify();
 
             println!("records checked:   {}", report.records_checked);
@@ -259,7 +262,7 @@ fn main() -> Result<()> {
 
         Commands::Close { path, password } => {
             let pw = get_password(password)?;
-            Vault::open(Path::new(&path), &pw)?;
+            Vault::open(Path::new(&path), &*pw)?;
             println!("Vault closed: {}", path);
         }
     }

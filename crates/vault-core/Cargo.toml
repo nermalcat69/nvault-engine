@@ -14,4 +14,5 @@ serde         = { version = "1", features = ["derive"] }
 bincode       = "1"
 thiserror     = "1"
 blake3        = "1"
+zeroize       = { version = "1", features = ["derive"] }
 uuid          = { version = "1", features = ["v4", "serde"] }

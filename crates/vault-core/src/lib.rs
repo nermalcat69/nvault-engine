@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 use vault_compression::{compress, decompress, CompressionError};
 use vault_crypto::{decrypt, derive_key, encrypt, generate_salt, CryptoError};
 use vault_index::{IndexEntry, VaultIndex};
@@ -111,7 +112,9 @@ fn assemble_payload(store: &HashMap<ChunkId, Vec<u8>>, ids: &[ChunkId]) -> Resul
 pub struct Vault {
     path: PathBuf,
     header: VaultHeader,
-    key: [u8; 32],
+    /// Master key — wrapped in Zeroizing so the bytes are overwritten
+    /// with zeroes the moment this Vault is dropped.
+    key: Zeroizing<[u8; 32]>,
     data: VaultData,
 }
 
@@ -122,7 +125,7 @@ impl Vault {
             return Err(VaultError::AlreadyExists(path.to_path_buf()));
         }
         let salt = generate_salt();
-        let key = derive_key(password.as_bytes(), &salt)?;
+        let key = Zeroizing::new(derive_key(password.as_bytes(), &salt)?);
         let header = VaultHeader {
             magic: *VAULT_MAGIC,
             version: VAULT_VERSION,
@@ -144,10 +147,11 @@ impl Vault {
     /// Open an existing vault file with a password.
     pub fn open(path: &Path, password: &str) -> Result<Self> {
         let (header, blob) = vault_storage::read_vault(path)?;
-        let key = derive_key(password.as_bytes(), &header.salt)?;
-        let decrypted = decrypt(&key, &blob)?;
-        let decompressed = decompress(&decrypted)?;
-        let data: VaultData = bincode::deserialize(&decompressed)?;
+        let key = Zeroizing::new(derive_key(password.as_bytes(), &header.salt)?);
+        // Decrypt and decompress in Zeroizing buffers so plaintext is wiped on drop.
+        let decrypted = Zeroizing::new(decrypt(&*key, &blob)?);
+        let decompressed = Zeroizing::new(decompress(&*decrypted)?);
+        let data: VaultData = bincode::deserialize(&*decompressed)?;
         Ok(Self { path: path.to_path_buf(), header, key, data })
     }
 
@@ -400,9 +404,10 @@ impl Vault {
     }
 
     fn flush(&self) -> Result<()> {
-        let serialized = bincode::serialize(&self.data)?;
-        let compressed = compress(&serialized)?;
-        let encrypted = encrypt(&self.key, &compressed)?;
+        // Both intermediate buffers are plaintext — Zeroizing wipes them on drop.
+        let serialized = Zeroizing::new(bincode::serialize(&self.data)?);
+        let compressed = Zeroizing::new(compress(&*serialized)?);
+        let encrypted = encrypt(&*self.key, &*compressed)?;
         vault_storage::write_vault(&self.path, &self.header, &encrypted)?;
         Ok(())
     }
